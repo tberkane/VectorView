@@ -1,0 +1,235 @@
+{# HTMX partial: map + grid results view, linked by hover. #}
+{% if not results %}
+  <p class="empty">No results above the stage-1 / date filter.</p>
+{% else %}
+  {# Detect missing location data: lab-side fallback manifests have lat=lon=0
+     because postgres wasn't reachable when the manifest was built. We treat
+     "all zeros" as a signal to hide the map. #}
+  {% set has_coords = results | selectattr('lat') | reject('equalto', 0) | list | length > 0 %}
+
+  {% set n_verified = (verifications | length) if verifications is defined else 0 %}
+  {% set n_yes_verified = (verifications.values() | select('equalto', 'yes') | list | length)
+                          if verifications is defined else 0 %}
+  <div class="results-header">
+    <span>{{ results|length }} results</span>
+    <span class="muted">
+      VLM yes: {{ results | selectattr('vlm_decision', 'equalto', 'yes') | list | length }} ·
+      unsure: {{ results | selectattr('vlm_decision', 'equalto', 'unsure') | list | length }} ·
+      no: {{ results | selectattr('vlm_decision', 'equalto', 'no') | list | length }}
+    </span>
+    <a class="btn btn-primary btn-small" href="/queries/{{ q.id }}/verify?cursor=0">
+      Verify ({{ n_verified }}/{{ results|length }})
+    </a>
+    {% if n_yes_verified > 0 %}
+      <form method="post" action="/queries/{{ q.id }}/refine" style="display:inline">
+        <button type="submit" class="btn btn-small"
+                title="Round-2 retrieval using your {{ n_yes_verified }} yes-click{{ 's' if n_yes_verified != 1 else '' }} as positive anchors (and no-clicks as hard negatives)">
+          Refine from feedback ({{ n_yes_verified }} yes)
+        </button>
+      </form>
+      <span class="query-cost muted" id="refine-cost"
+            data-query-id="{{ q.id }}"
+            title="K × per-call × ~35% cache miss rate (refines reuse ~65% of parent's top-K)">est. cost ~$…</span>
+    {% else %}
+      <button type="button" class="btn btn-small" disabled
+              title="Click K on at least one result in verify mode to enable refine">
+        Refine from feedback
+      </button>
+    {% endif %}
+    {% if has_coords %}
+      <span class="view-toggle">
+        <button type="button" class="btn btn-small toggle-map active"
+                onclick="document.getElementById('results-layout').classList.remove('grid-only');this.classList.add('active');document.querySelector('.toggle-grid').classList.remove('active');">map + grid</button>
+        <button type="button" class="btn btn-small toggle-grid"
+                onclick="document.getElementById('results-layout').classList.add('grid-only');this.classList.add('active');document.querySelector('.toggle-map').classList.remove('active');">grid only</button>
+      </span>
+    {% endif %}
+  </div>
+
+  {% if not has_coords %}
+    <div class="banner banner-warn">
+      <strong>Location data unavailable for this scan.</strong>
+      These results have no coordinates, so the map is hidden. Use the
+      <em>Open in GSV ↗</em> links to see each panorama on Google Maps.
+    </div>
+  {% endif %}
+
+  <div id="results-layout" class="results-layout {% if not has_coords %}grid-only{% endif %}">
+    {% if has_coords %}
+      <div id="results-map" class="results-map"></div>
+    {% endif %}
+
+    <ul class="results-grid">
+      {% for r in results %}
+        {% set verdict = r.vlm_decision %}
+        {% set user_verdict = verifications.get(r.image_id) if verifications is defined else none %}
+        <li class="result-card decision-{{ verdict }} {% if user_verdict %}user-verdict-{{ user_verdict }}{% endif %}"
+            data-image-id="{{ r.image_id }}"
+            data-rank="{{ r.rank }}"
+            {% if r.lat %}data-lat="{{ r.lat }}" data-lon="{{ r.lon }}"{% endif %}
+            data-score="{{ r.vlm_score }}">
+          <div class="result-thumb-wrap">
+            <img class="result-thumb"
+                 src="/cache/{{ r.image_id }}.jpg"
+                 alt="{{ r.image_id }}"
+                 loading="lazy">
+            {% if r.bbox %}
+              {% set ymin = r.bbox[0] / 10.0 %}
+              {% set xmin = r.bbox[1] / 10.0 %}
+              {% set ymax = r.bbox[2] / 10.0 %}
+              {% set xmax = r.bbox[3] / 10.0 %}
+              <div class="bbox-overlay bbox-{{ verdict }} bbox-thumb"
+                   style="top: {{ ymin }}%; left: {{ xmin }}%; width: {{ xmax - xmin }}%; height: {{ ymax - ymin }}%;"></div>
+            {% endif %}
+            <span class="result-score">{{ "%.2f"|format(r.vlm_score) }}</span>
+            {% if user_verdict %}
+              <span class="user-verdict-badge user-verdict-{{ user_verdict }}">
+                you: {{ user_verdict }}
+              </span>
+            {% endif %}
+          </div>
+          <div class="result-meta">
+            <span class="badge decision-badge decision-{{ verdict }}">{{ verdict }}</span>
+            <span class="muted">#{{ r.rank }}</span>
+            {% if r.captured_at %}<span class="muted">· {{ r.captured_at }}</span>{% endif %}
+          </div>
+          {% if r.vlm_reason %}
+            <p class="result-reason">{{ r.vlm_reason }}</p>
+          {% endif %}
+          <div class="result-actions">
+            {% if r.pano_id %}
+              <a class="btn btn-small"
+                 href="https://www.google.com/maps/@?api=1&map_action=pano&pano={{ r.pano_id }}&heading={{ r.heading }}"
+                 target="_blank" rel="noopener noreferrer">Open in GSV ↗</a>
+            {% endif %}
+            {% if r.lat %}
+              <button type="button" class="btn btn-small focus-map"
+                      data-lat="{{ r.lat }}" data-lon="{{ r.lon }}">Focus on map</button>
+            {% endif %}
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  </div>
+
+  <script>
+    (function(){
+      const el = document.getElementById('refine-cost');
+      if (!el) return;
+      const qid = el.dataset.queryId;
+      fetch(`/queries/${qid}/refine/cost`)
+        .then(r => r.ok ? r.json() : null)
+        .then(d => {
+          if (!d) { el.textContent = ''; return; }
+          el.textContent = `est. cost ~$${d.est_cost_usd.toFixed(3)}`;
+          el.title =
+            `K=${d.k} × $${d.per_call_usd}/call × ~${Math.round((1 - d.expected_overlap) * 100)}% miss rate ` +
+            `(parent top-K cached: ${d.n_parent_cached}/${d.n_parent_top_k}; ` +
+            `worst case $${d.worst_cost_usd.toFixed(3)})`;
+        })
+        .catch(() => { el.textContent = ''; });
+    })();
+  </script>
+
+  {% if has_coords %}
+    <script type="application/json" id="results-data">
+      {{ {"points": results | map(attribute=None) | list} | tojson }}
+    </script>
+    <script>
+      (function(){
+        const layout = document.getElementById('results-layout');
+        const mapEl = document.getElementById('results-map');
+        if (!mapEl || !window.L) return;
+
+        // Build point payload from the rendered DOM (Jinja already filled cards
+        // with data attributes), keyed by image_id.
+        const cards = Array.from(document.querySelectorAll('.result-card[data-lat]'));
+        const points = cards.map(c => ({
+          image_id: c.dataset.imageId,
+          rank: parseInt(c.dataset.rank, 10),
+          score: parseFloat(c.dataset.score),
+          lat: parseFloat(c.dataset.lat),
+          lon: parseFloat(c.dataset.lon),
+        }));
+
+        if (points.length === 0) { mapEl.style.display = 'none'; return; }
+
+        // Score → color (red low → green high).
+        function color(s) {
+          const t = Math.max(0, Math.min(1, s));
+          const r = Math.round(220 - 130 * t);
+          const g = Math.round(80 + 130 * t);
+          const b = 80;
+          return `rgb(${r},${g},${b})`;
+        }
+
+        const lats = points.map(p => p.lat), lons = points.map(p => p.lon);
+        const bbox = [
+          [Math.min(...lats), Math.min(...lons)],
+          [Math.max(...lats), Math.max(...lons)],
+        ];
+
+        const map = L.map(mapEl, { zoomControl: true, attributionControl: true });
+        L.tileLayer(
+          'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+          { maxZoom: 19, attribution: 'Tiles &copy; Esri' }
+        ).addTo(map);
+        if (lats.length === 1) {
+          map.setView([lats[0], lons[0]], 16);
+        } else {
+          map.fitBounds(bbox, { padding: [20, 20] });
+        }
+
+        const markerByImageId = {};
+        points.forEach(p => {
+          const m = L.circleMarker([p.lat, p.lon], {
+            radius: 7 + 4 * p.score,
+            color: '#fff',
+            weight: 1,
+            fillColor: color(p.score),
+            fillOpacity: 0.85,
+          }).addTo(map);
+          m.bindTooltip(`#${p.rank} · score ${p.score.toFixed(2)}`,
+                        { direction: 'top' });
+          m.on('mouseover', () => {
+            const card = document.querySelector(`.result-card[data-image-id="${p.image_id}"]`);
+            if (card) card.classList.add('hover-from-map');
+          });
+          m.on('mouseout', () => {
+            const card = document.querySelector(`.result-card[data-image-id="${p.image_id}"]`);
+            if (card) card.classList.remove('hover-from-map');
+          });
+          m.on('click', () => {
+            const card = document.querySelector(`.result-card[data-image-id="${p.image_id}"]`);
+            if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          });
+          markerByImageId[p.image_id] = m;
+        });
+
+        // Card hover -> pulse the marker.
+        document.querySelectorAll('.result-card[data-lat]').forEach(card => {
+          card.addEventListener('mouseenter', () => {
+            const m = markerByImageId[card.dataset.imageId];
+            if (!m) return;
+            m.setStyle({ weight: 3 });
+            m.bringToFront();
+          });
+          card.addEventListener('mouseleave', () => {
+            const m = markerByImageId[card.dataset.imageId];
+            if (!m) return;
+            m.setStyle({ weight: 1 });
+          });
+        });
+
+        // "Focus on map" buttons.
+        document.querySelectorAll('.focus-map').forEach(b => {
+          b.addEventListener('click', () => {
+            const lat = parseFloat(b.dataset.lat), lon = parseFloat(b.dataset.lon);
+            map.setView([lat, lon], 18);
+            mapEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          });
+        });
+      })();
+    </script>
+  {% endif %}
+{% endif %}

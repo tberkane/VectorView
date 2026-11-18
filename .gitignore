@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+.coverage
+coverage.xml
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+site/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Everything VectorView writes: images, embeddings, quota state, databases
+data/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+.DS_Store

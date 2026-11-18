@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+{% block title %}New scan · VectorView{% endblock %}
+{% block content %}
+<section class="page">
+  <div class="page-header">
+    <h1>New scan</h1>
+    <div class="muted">Draw a rectangle on the map, pick a sample spacing, and submit.</div>
+  </div>
+
+  <div id="banner-api-key" class="banner banner-warn"
+       style="display:{% if has_gsv_key %}none{% else %}block{% endif %};">
+    <strong>No Street View API key configured.</strong>
+    The API source can't fetch images without one. Add a key to <code>.env</code> as
+    <code>GSV_API_KEY_1=...</code> and restart the server, or pick the
+    <em>scraper</em> source below.
+  </div>
+
+  <div id="banner-scraper" class="banner banner-warn" style="display:none;">
+    <strong>Scraper mode (streetlevel)</strong> — collects panoramas with the
+    <code>streetlevel</code> library instead of the Static API: no key, no
+    per-image cost and no quota ledger. Slower than the API source (full
+    panorama download, then perspective crops).
+  </div>
+
+  {% if not has_scraper %}
+  <div id="banner-scraper-missing" class="banner banner-warn" style="display:none;">
+    <strong>Scraper extras not installed.</strong> Run
+    <code>pip install "vectorview[scraper]"</code> and restart the server to enable
+    this path.
+  </div>
+  {% endif %}
+
+  <form id="scan-form" method="post" action="/scans" class="scan-new-form">
+    <div class="scan-new-grid">
+      <div id="scan-map" class="scan-new-map"></div>
+
+      <aside class="scan-new-side">
+        <label class="field">
+          <span>Name</span>
+          <input type="text" name="name" placeholder="e.g. downtown" required>
+        </label>
+
+        <fieldset class="field">
+          <legend>Image source</legend>
+          <label class="radio-row">
+            <input type="radio" name="fetch_mode" value="api" id="mode-api" checked>
+            <span><strong>Street View API</strong> — Static API,
+                  needs a key, ~$0.007/image</span>
+          </label>
+          <label class="radio-row">
+            <input type="radio" name="fetch_mode" value="scraper" id="mode-scraper"
+                   {% if not has_scraper %}disabled{% endif %}>
+            <span><strong>Scraper</strong> — streetlevel, no key{% if not has_scraper %} <em>(extras not installed)</em>{% endif %}</span>
+          </label>
+        </fieldset>
+
+        <label class="field">
+          <span>Sample spacing: <strong id="spacing-label">50</strong> m</span>
+          <input type="range" name="spacing_m" id="spacing"
+                 min="25" max="200" step="25" value="50">
+        </label>
+
+        <div class="field bbox-readout">
+          <span>Bounding box (WGS84)</span>
+          <div class="muted" id="bbox-readout">Draw a rectangle to set.</div>
+          <input type="hidden" name="bbox_n" id="bbox-n">
+          <input type="hidden" name="bbox_s" id="bbox-s">
+          <input type="hidden" name="bbox_e" id="bbox-e">
+          <input type="hidden" name="bbox_w" id="bbox-w">
+        </div>
+
+        <div class="field preview">
+          <span>Estimate</span>
+          <ul class="preview-list" id="preview-list">
+            <li><span class="muted">Area:</span> <span id="prev-area">—</span> km²</li>
+            <li><span class="muted">Sample panos:</span> <span id="prev-panos">—</span></li>
+            <li><span class="muted">Image fetches:</span> <span id="prev-imgs">—</span></li>
+            <li><span class="muted">Est. cost:</span> $<span id="prev-cost">—</span></li>
+            <li><span class="muted">Est. time:</span> <span id="prev-min">—</span> min</li>
+          </ul>
+          <p class="muted" id="prev-warn">
+            Directional only — actual count depends on OSM road density at scan time.
+          </p>
+        </div>
+
+        <div class="field">
+          <button type="submit" id="submit-btn" class="btn btn-primary" disabled>
+            Create scan
+          </button>
+          <a href="/" class="btn btn-small">Cancel</a>
+        </div>
+      </aside>
+    </div>
+  </form>
+</section>
+
+<script>
+(function(){
+  const mapEl = document.getElementById('scan-map');
+  if (!mapEl || !window.L) return;
+
+  // Start zoomed out; the user pans to their area and draws a rectangle.
+  const map = L.map(mapEl).setView([30, -95], 4);
+  L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    { maxZoom: 19, attribution: 'Tiles &copy; Esri' }
+  ).addTo(map);
+
+  const drawn = new L.FeatureGroup();
+  map.addLayer(drawn);
+
+  const drawControl = new L.Control.Draw({
+    edit: { featureGroup: drawn },
+    draw: {
+      polygon: false, polyline: false, marker: false, circle: false,
+      circlemarker: false,
+      rectangle: { shapeOptions: { color: '#5fa8ff', weight: 2 } },
+    },
+  });
+  map.addControl(drawControl);
+
+  const fields = {
+    n: document.getElementById('bbox-n'),
+    s: document.getElementById('bbox-s'),
+    e: document.getElementById('bbox-e'),
+    w: document.getElementById('bbox-w'),
+  };
+  const readout = document.getElementById('bbox-readout');
+  const submitBtn = document.getElementById('submit-btn');
+  const spacingInput = document.getElementById('spacing');
+  const spacingLabel = document.getElementById('spacing-label');
+  const modeRadios = document.querySelectorAll('input[name="fetch_mode"]');
+  const bannerApi = document.getElementById('banner-api-key');
+  const bannerScraper = document.getElementById('banner-scraper');
+  const bannerScraperMissing = document.getElementById('banner-scraper-missing');
+  const hasGsvKey = {{ 'true' if has_gsv_key else 'false' }};
+  const hasScraper = {{ 'true' if has_scraper else 'false' }};
+
+  let bbox = null;
+  let previewTimer = null;
+
+  function currentMode() {
+    const checked = document.querySelector('input[name="fetch_mode"]:checked');
+    return checked ? checked.value : 'api';
+  }
+
+  function refreshBanners() {
+    const m = currentMode();
+    if (bannerApi) {
+      bannerApi.style.display = (m === 'api' && !hasGsvKey) ? 'block' : 'none';
+    }
+    if (bannerScraper) {
+      bannerScraper.style.display = (m === 'scraper') ? 'block' : 'none';
+    }
+    if (bannerScraperMissing) {
+      bannerScraperMissing.style.display =
+        (m === 'scraper' && !hasScraper) ? 'block' : 'none';
+    }
+  }
+
+  function setBbox(b) {
+    bbox = b;
+    fields.n.value = b.n; fields.s.value = b.s;
+    fields.e.value = b.e; fields.w.value = b.w;
+    readout.innerHTML =
+      `(${b.s.toFixed(3)}, ${b.w.toFixed(3)}) → ` +
+      `(${b.n.toFixed(3)}, ${b.e.toFixed(3)})`;
+    submitBtn.disabled = false;
+    debouncePreview();
+  }
+
+  function debouncePreview() {
+    if (previewTimer) clearTimeout(previewTimer);
+    previewTimer = setTimeout(refreshPreview, 200);
+  }
+
+  async function refreshPreview() {
+    if (!bbox) return;
+    const fd = new FormData();
+    fd.append('bbox_n', bbox.n); fd.append('bbox_s', bbox.s);
+    fd.append('bbox_e', bbox.e); fd.append('bbox_w', bbox.w);
+    fd.append('spacing_m', spacingInput.value);
+    fd.append('fetch_mode', currentMode());
+    try {
+      const r = await fetch('/scans/preview', { method: 'POST', body: fd });
+      const d = await r.json();
+      document.getElementById('prev-area').textContent = d.area_km2;
+      document.getElementById('prev-panos').textContent = d.est_panos.toLocaleString();
+      document.getElementById('prev-imgs').textContent = d.est_images.toLocaleString();
+      document.getElementById('prev-cost').textContent =
+        d.fetch_mode === 'scraper' ? '0.00 (free)' : d.est_cost_usd;
+      document.getElementById('prev-min').textContent = d.est_minutes;
+      const warnEl = document.getElementById('prev-warn');
+      if (warnEl && d.warn) warnEl.textContent = d.warn;
+    } catch (err) {
+      console.error('preview failed', err);
+    }
+  }
+
+  map.on(L.Draw.Event.CREATED, (e) => {
+    drawn.clearLayers();
+    drawn.addLayer(e.layer);
+    const b = e.layer.getBounds();
+    setBbox({
+      n: b.getNorth(), s: b.getSouth(),
+      e: b.getEast(), w: b.getWest(),
+    });
+  });
+  map.on(L.Draw.Event.EDITED, (e) => {
+    e.layers.eachLayer((layer) => {
+      const b = layer.getBounds();
+      setBbox({
+        n: b.getNorth(), s: b.getSouth(),
+        e: b.getEast(), w: b.getWest(),
+      });
+    });
+  });
+
+  spacingInput.addEventListener('input', () => {
+    spacingLabel.textContent = spacingInput.value;
+    debouncePreview();
+  });
+
+  modeRadios.forEach((r) => r.addEventListener('change', () => {
+    refreshBanners();
+    debouncePreview();
+  }));
+  refreshBanners();
+})();
+</script>
+{% endblock %}

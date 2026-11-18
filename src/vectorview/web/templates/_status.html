@@ -1,0 +1,35 @@
+{# HTMX partial: query progress. Polled every 1s when the query is in flight.
+   When status hits "ready" or "failed", the polling stops by replacing this
+   partial with one that has no hx-trigger. #}
+{% set stages = ['pending', 'expanding', 'stage1', 'reranking', 'ready'] %}
+<div class="status-card status-{{ q.status }}">
+  <div class="status-row">
+    <span class="badge badge-status badge-{{ q.status }}">{{ q.status }}</span>
+    <span class="muted">query #{{ q.id }} · K={{ q.k }} · {{ q.vlm_model }}</span>
+  </div>
+  <ol class="status-steps">
+    {% for stage in stages %}
+      {% set i = loop.index0 %}
+      {% set cur = stages.index(q.status) if q.status in stages else 5 %}
+      <li class="step {% if i < cur %}done{% elif i == cur %}current{% endif %}">{{ stage }}</li>
+    {% endfor %}
+  </ol>
+  {% if q.status in ('pending', 'expanding', 'stage1', 'reranking') %}
+    {# No fractional progress signal; indeterminate bar signals "alive". #}
+    <div class="progress-bar progress-indeterminate" role="progressbar"
+         aria-label="working">
+      <div class="progress-fill"></div>
+    </div>
+  {% endif %}
+  {% if q.status == 'failed' %}
+    <p class="error">Failed: {{ q.error }}</p>
+  {% endif %}
+  {% if q.status == 'ready' %}
+    {# Cause the results panel to load once we transition to ready. #}
+    <div hx-trigger="load"
+         hx-get="/queries/{{ q.id }}/results"
+         hx-target="#results-area"
+         hx-swap="innerHTML"
+         style="display:none"></div>
+  {% endif %}
+</div>

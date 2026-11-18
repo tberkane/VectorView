@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use VectorView, please cite it as below."
+title: "VectorView: text search over street-level imagery"
+type: software
+authors:
+  - family-names: Berkane
+    given-names: Thomas
+version: 0.1.0
+date-released: "2026-11-18"
+license: Apache-2.0
+repository-code: "https://github.com/tberkane/VectorView"
+url: "https://tberkane.github.io/VectorView/"
+abstract: >-
+  VectorView finds images of a visual feature, described in plain words, among the Street View
+  images of an area. It collects images with the Street View Static API or the streetlevel library,
+  embeds images, tiles and patch regions with SigLIP-2, expands queries with an LLM, reranks the top
+  results with a vision-language model, and provides a local web app for verifying results and
+  refining queries.
+keywords:
+  - street view
+  - image retrieval
+  - vision-language models
+  - SigLIP
+  - public health

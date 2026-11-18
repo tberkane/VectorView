@@ -1,0 +1,124 @@
+{# HTMX partial: one image's worth of verify-mode UI. Swapped into
+   #verify-card-area in place. Embeds data-* on the root so the keyboard
+   handler + progress chip can read state without a round-trip. #}
+{% if done %}
+  <div class="verify-card verify-done"
+       data-cursor="{{ total }}" data-total="{{ total }}"
+       data-precision="{{ precision }}"
+       data-n-yes="{{ n_yes }}" data-n-no="{{ n_no }}" data-n-unsure="{{ n_unsure }}">
+    <h2>All {{ total }} results reviewed.</h2>
+    <p class="muted">{{ n_yes }} yes · {{ n_no }} no · {{ n_unsure }} unsure</p>
+    <p>Estimated precision: <strong>{{ "%.0f%%"|format(precision * 100) }}</strong></p>
+    <div class="verify-done-actions">
+      <a class="btn" href="/queries/{{ q.id }}/verify?cursor=0">Review again from start</a>
+      <a class="btn btn-primary" href="/scans/{{ q.scan_id }}?q={{ q.id }}">Back to results</a>
+    </div>
+  </div>
+{% else %}
+  <div class="verify-card"
+       data-cursor="{{ cursor + 1 }}" data-total="{{ total }}"
+       data-precision="{{ precision }}"
+       data-n-yes="{{ n_yes }}" data-n-no="{{ n_no }}" data-n-unsure="{{ n_unsure }}">
+    <div class="verify-image-wrap" x-data="{ showBbox: true }">
+      <div class="verify-image-frame">
+        <img class="verify-image"
+             src="/cache/{{ current.image_id }}.jpg"
+             alt="{{ current.image_id }}">
+        {% if current.bbox %}
+          {# bbox is [y_min, x_min, y_max, x_max] in 0-1000 coords.
+             Convert to percent for absolute positioning within the frame. #}
+          {% set ymin = current.bbox[0] / 10.0 %}
+          {% set xmin = current.bbox[1] / 10.0 %}
+          {% set ymax = current.bbox[2] / 10.0 %}
+          {% set xmax = current.bbox[3] / 10.0 %}
+          <div class="bbox-overlay bbox-{{ current.vlm_decision }}"
+               x-show="showBbox"
+               style="top: {{ ymin }}%; left: {{ xmin }}%; width: {{ xmax - xmin }}%; height: {{ ymax - ymin }}%;"></div>
+          <button type="button"
+                  class="btn btn-small bbox-toggle"
+                  x-on:click="showBbox = !showBbox"
+                  x-text="showBbox ? 'hide bbox' : 'show bbox'"></button>
+        {% endif %}
+      </div>
+      <div class="verify-image-overlay">
+        <span class="badge decision-badge decision-{{ current.vlm_decision }}">VLM: {{ current.vlm_decision }}</span>
+        <span class="badge">score {{ "%.2f"|format(current.vlm_score) }}</span>
+        <span class="badge">#{{ current.rank }} / {{ total }}</span>
+      </div>
+    </div>
+
+    <aside class="verify-side">
+      <h3>{{ q.text }}</h3>
+
+      <div class="verify-meta">
+        <div><span class="muted">image</span> <code>{{ current.image_id }}</code></div>
+        {% if current.pano_id %}
+          <div><span class="muted">pano</span> <code>{{ current.pano_id }}</code></div>
+        {% endif %}
+        {% if current.captured_at %}
+          <div><span class="muted">captured</span> {{ current.captured_at }}</div>
+        {% endif %}
+        {% if current.lat %}
+          <div><span class="muted">lat/lon</span> {{ "%.5f"|format(current.lat) }}, {{ "%.5f"|format(current.lon) }}</div>
+        {% endif %}
+        <div><span class="muted">stage-1</span> {{ "%.3f"|format(current.stage1_score) }}</div>
+      </div>
+
+      {% if current.vlm_reason %}
+        <div class="verify-reason">
+          <span class="muted">VLM reason:</span> {{ current.vlm_reason }}
+        </div>
+      {% endif %}
+
+      {% if existing_verdict %}
+        <div class="verify-existing">
+          <span class="muted">your previous verdict:</span>
+          <span class="badge decision-badge decision-{{ existing_verdict }}">{{ existing_verdict }}</span>
+          <span class="muted">— press a verdict key to overwrite, or Space to keep + advance.</span>
+        </div>
+      {% endif %}
+
+      <div class="verify-gsv">
+        {% if current.pano_id %}
+          <a class="btn"
+             href="https://www.google.com/maps/@?api=1&map_action=pano&pano={{ current.pano_id }}&heading={{ current.heading }}"
+             target="_blank" rel="noopener noreferrer">Open in GSV ↗</a>
+        {% endif %}
+      </div>
+    </aside>
+
+    <footer class="verify-actions"
+            hx-target="#verify-card-area"
+            hx-swap="innerHTML">
+      <button type="button" id="btn-no"
+              class="btn btn-verdict btn-no"
+              hx-post="/queries/{{ q.id }}/verifications"
+              hx-vals='{"image_id": "{{ current.image_id }}", "verdict": "no", "cursor": {{ cursor }}}'>
+        <kbd>J</kbd> no
+      </button>
+      <button type="button" id="btn-yes"
+              class="btn btn-verdict btn-yes"
+              hx-post="/queries/{{ q.id }}/verifications"
+              hx-vals='{"image_id": "{{ current.image_id }}", "verdict": "yes", "cursor": {{ cursor }}}'>
+        <kbd>K</kbd> yes
+      </button>
+      <button type="button" id="btn-unsure"
+              class="btn btn-verdict btn-unsure"
+              hx-post="/queries/{{ q.id }}/verifications"
+              hx-vals='{"image_id": "{{ current.image_id }}", "verdict": "unsure", "cursor": {{ cursor }}}'>
+        <kbd>U</kbd> unsure
+      </button>
+      <button type="button" id="btn-skip"
+              class="btn btn-skip"
+              hx-get="/queries/{{ q.id }}/verify/card?cursor={{ next_cursor }}">
+        <kbd>Space</kbd> skip
+      </button>
+      <button type="button" id="btn-back"
+              class="btn btn-skip"
+              hx-get="/queries/{{ q.id }}/verify/card?cursor={{ prev_cursor }}"
+              {% if cursor == 0 %}disabled{% endif %}>
+        <kbd>H</kbd> back
+      </button>
+    </footer>
+  </div>
+{% endif %}

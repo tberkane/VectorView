@@ -1,0 +1,77 @@
+{# HTMX partial: scan progress card. Re-fetched every 2s while the scan is in
+   flight; the parent div in scan_detail.html owns the hx-trigger. #}
+{% set stages = ['pending', 'fetching', 'encoding', 'tiling', 'patching', 'ready'] %}
+{# Compute progress per stage. Namespace so the assignment escapes the if-arm. #}
+{% set ns = namespace(frac=none, num=none, den=none, label=none) %}
+{% if scan.status == 'fetching' and scan.n_target %}
+  {% set ns.num = scan.n_fetched or 0 %}
+  {% set ns.den = scan.n_target %}
+  {% set ns.frac = ns.num / ns.den %}
+  {% set ns.label = 'images fetched' %}
+{% elif scan.status == 'encoding' and scan.n_fetched %}
+  {% set ns.num = scan.n_encoded or 0 %}
+  {% set ns.den = scan.n_fetched %}
+  {% set ns.frac = ns.num / ns.den %}
+  {% set ns.label = 'images encoded' %}
+{% elif scan.status == 'tiling' and scan.n_fetched %}
+  {% set ns.num = scan.n_tiled or 0 %}
+  {% set ns.den = scan.n_fetched %}
+  {% set ns.frac = ns.num / ns.den %}
+  {% set ns.label = 'images tiled' %}
+{% elif scan.status == 'patching' and scan.n_fetched %}
+  {% set ns.num = scan.n_patched or 0 %}
+  {% set ns.den = scan.n_fetched %}
+  {% set ns.frac = ns.num / ns.den %}
+  {% set ns.label = 'images patch-encoded' %}
+{% endif %}
+<div class="status-panel"
+     {% if scan.status not in ('ready', 'failed') %}
+       hx-get="/scans/{{ scan.id }}/status"
+       hx-trigger="every 2s"
+       hx-swap="outerHTML"
+     {% endif %}>
+  <div class="status-row">
+    <span class="badge badge-status badge-{{ scan.status }}">{{ scan.status }}</span>
+    {% if scan.fetch_mode %}
+      <span class="muted">source: <strong>{{ scan.fetch_mode }}</strong></span>
+    {% endif %}
+    {% if scan.status_message %}
+      <span class="muted">{{ scan.status_message }}</span>
+    {% endif %}
+  </div>
+  <ol class="status-steps">
+    {% for stage in stages %}
+      {% set i = loop.index0 %}
+      {% set cur = stages.index(scan.status) if scan.status in stages else 5 %}
+      <li class="step {% if i < cur %}done{% elif i == cur %}current{% endif %}">{{ stage }}</li>
+    {% endfor %}
+  </ol>
+  {% if ns.frac is not none %}
+    <div class="progress-bar" role="progressbar"
+         aria-valuenow="{{ (ns.frac * 100)|round(0)|int }}"
+         aria-valuemin="0" aria-valuemax="100">
+      <div class="progress-fill" style="width: {{ (ns.frac * 100)|round(1) }}%"></div>
+    </div>
+    <div class="muted progress-readout">
+      {{ ns.num }} / {{ ns.den }} {{ ns.label }} ({{ (ns.frac * 100)|round(0)|int }}%)
+    </div>
+  {% elif scan.status in ('fetching', 'encoding', 'tiling', 'patching') %}
+    <div class="progress-bar progress-indeterminate" role="progressbar"
+         aria-label="working">
+      <div class="progress-fill"></div>
+    </div>
+  {% endif %}
+  <div class="muted scan-counts">
+    {% if scan.n_fetched %}fetched: {{ scan.n_fetched }} · {% endif %}
+    {% if scan.n_encoded %}encoded: {{ scan.n_encoded }} · {% endif %}
+    {% if scan.n_tiled %}tiled: {{ scan.n_tiled }} imgs{% endif %}
+    {% if scan.n_patched %} · patches: {{ scan.n_patched }} imgs{% endif %}
+  </div>
+  {% if scan.error %}
+    <p class="error">Error: {{ scan.error }}</p>
+  {% endif %}
+  {% if scan.status == 'ready' %}
+    {# When the polling sees ready, reload the page so the query form appears. #}
+    <script>setTimeout(() => location.reload(), 300);</script>
+  {% endif %}
+</div>

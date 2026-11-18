@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block title %}{{ scan.name }} · VectorView{% endblock %}
+{% block content %}
+<section class="page">
+  <div class="page-header">
+    <h1>{{ scan.name }}</h1>
+    <div class="scan-card-meta">
+      status: <span class="badge badge-status badge-{{ scan.status }}">{{ scan.status }}</span>
+      {% if scan.fetch_mode == "corpus" %}· <span class="badge badge-corpus">corpus</span>{% endif %}
+      · spacing {{ scan.spacing_m }}m
+      {% if scan.region_filter %}· region <code>{{ scan.region_filter }}</code>{% endif %}
+    </div>
+  </div>
+
+  {% if scan.status != 'ready' %}
+    {# The partial owns polling via its own hx-trigger; the parent is just a
+       container so we don't double-fire. #}
+    {% include '_scan_status.html' %}
+  {% else %}
+    <div class="query-panel">
+      <h2>Search</h2>
+      <form class="query-form" method="post" action="/scans/{{ scan.id }}/queries">
+        <textarea
+          name="text"
+          id="query-text"
+          rows="2"
+          required
+          autofocus
+          placeholder='e.g. "an overflowing dumpster behind a building"'>{% if active_query %}{{ active_query.text }}{% endif %}</textarea>
+        <div class="query-form-options">
+          <label>
+            <span class="muted">K</span>
+            <select name="k" id="k-select">
+              <option value="25">25</option>
+              <option value="50" selected>50</option>
+              <option value="100">100</option>
+            </select>
+          </label>
+          <label>
+            <span class="muted">VLM</span>
+            <select name="vlm_model" id="vlm-select">
+              <option value="gemini-3.1-flash-lite" data-cost="0.00015" selected>gemini-3.1-flash-lite</option>
+              <option value="gpt-5-mini" data-cost="0.001">gpt-5-mini</option>
+            </select>
+          </label>
+          <label>
+            <span class="muted">Min date</span>
+            <input type="date" name="min_date" value="">
+          </label>
+          <span class="query-cost muted" id="query-cost">est. cost ~$0.055</span>
+          <button type="submit" class="btn btn-primary">Search</button>
+        </div>
+      </form>
+      <p class="muted">Try:
+        {% set chips = [
+          ('loose tire', 'a loose tire in a yard or on the street'),
+          ('overflowing dumpster', 'an overflowing dumpster behind a building'),
+          ('water in ditch', 'standing water pooled in a roadside ditch'),
+          ('clogged storm drain', 'a clogged storm drain on the sidewalk'),
+          ('graffiti', 'graffiti on a wall'),
+          ('abandoned shopping cart', 'an abandoned shopping cart on the sidewalk'),
+        ] %}
+        {% for label, text in chips %}
+          <a class="chip" href="#"
+             onclick="event.preventDefault();var t=document.getElementById('query-text');t.value={{ text|tojson }};t.focus();">{{ label }}</a>
+        {% endfor %}
+      </p>
+      <script>
+      (function(){
+        // Live cost estimate: K × per-call $.
+        const k = document.getElementById('k-select');
+        const v = document.getElementById('vlm-select');
+        const el = document.getElementById('query-cost');
+        function update() {
+          const perCall = parseFloat(v.options[v.selectedIndex].dataset.cost);
+          const total = perCall * parseInt(k.value, 10) + 0.005;  // +$ for LLM expand
+          el.textContent = `est. cost ~$${total.toFixed(3)}`;
+        }
+        k.addEventListener('change', update);
+        v.addEventListener('change', update);
+        update();
+      })();
+      </script>
+    </div>
+
+    {% if active_query %}
+      <section class="active-query" id="active-query">
+        <h2>
+          {% if active_query.parent_query_id %}
+            <span class="badge badge-refine" title="Relevance-feedback round 2 of query #{{ active_query.parent_query_id }}">refine of #{{ active_query.parent_query_id }}</span>
+          {% endif %}
+          Query: <em>{{ active_query.text }}</em>
+          {% if active_query.parent_query_id %}
+            <a class="muted" style="font-size:0.7em; margin-left:0.5em"
+               href="/scans/{{ scan.id }}?q={{ active_query.parent_query_id }}">
+              ← compare to round-1
+            </a>
+          {% endif %}
+        </h2>
+        {% if active_query.status not in ('ready', 'failed') %}
+          <div id="status-area"
+               hx-get="/queries/{{ active_query.id }}/status"
+               hx-trigger="load, every 1s"
+               hx-swap="innerHTML">
+            <p class="muted">Loading…</p>
+          </div>
+        {% else %}
+          <div id="status-area">
+            {% with q = active_query %}{% include '_status.html' %}{% endwith %}
+          </div>
+        {% endif %}
+
+        <div id="results-area"
+             {% if active_query.status == 'ready' %}
+               hx-get="/queries/{{ active_query.id }}/results"
+               hx-trigger="load"
+               hx-swap="innerHTML"
+             {% endif %}>
+        </div>
+      </section>
+    {% endif %}
+
+    {% if queries %}
+      <h2>Recent queries</h2>
+      <ul class="query-list">
+        {% for past in queries %}
+          <li class="query-card {% if past.parent_query_id %}query-card-refine{% endif %}">
+            {% if past.parent_query_id %}
+              <span class="badge badge-refine" title="Refine of #{{ past.parent_query_id }}">↳ refine</span>
+            {% endif %}
+            <a class="query-text" href="/scans/{{ scan.id }}?q={{ past.id }}">{{ past.text }}</a>
+            <span class="badge badge-status badge-{{ past.status }}">{{ past.status }}</span>
+            <span class="muted">{{ past.created_at }}</span>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  {% endif %}
+</section>
+{% endblock %}

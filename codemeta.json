@@ -1,0 +1,54 @@
+{
+  "@context": "https://w3id.org/codemeta/3.0",
+  "@type": "SoftwareSourceCode",
+  "name": "VectorView",
+  "description": "Text search over street-level imagery: Street View collection (Static API with per-key caps, or the streetlevel library), SigLIP-2 image, tile and patch-region embeddings, LLM query expansion, VLM reranking, and a local web app for verification and relevance feedback.",
+  "version": "0.1.0",
+  "softwareVersion": "0.1.0",
+  "datePublished": "2026-11-18",
+  "license": "https://spdx.org/licenses/Apache-2.0",
+  "codeRepository": "https://github.com/tberkane/VectorView",
+  "url": "https://tberkane.github.io/VectorView/",
+  "issueTracker": "https://github.com/tberkane/VectorView/issues",
+  "programmingLanguage": "Python",
+  "runtimePlatform": "Python >= 3.11",
+  "operatingSystem": [
+    "Linux",
+    "macOS"
+  ],
+  "developmentStatus": "active",
+  "author": [
+    {
+      "@type": "Person",
+      "givenName": "Thomas",
+      "familyName": "Berkane"
+    }
+  ],
+  "keywords": [
+    "street view",
+    "image retrieval",
+    "vision-language models",
+    "SigLIP",
+    "public health"
+  ],
+  "softwareRequirements": [
+    "httpx>=0.28",
+    "numpy>=1.26",
+    "osmnx>=2.0",
+    "pgvector>=0.4",
+    "pillow>=10.0",
+    "psycopg[binary]>=3.2",
+    "pyproj>=3.6",
+    "python-dotenv>=1.0",
+    "shapely>=2.1",
+    "tqdm>=4.66"
+  ],
+  "softwareSuggestions": [
+    "torch>=2.4",
+    "transformers>=5.8",
+    "openai>=2.1",
+    "google-genai>=1.0",
+    "fastapi>=0.115",
+    "streetlevel>=0.10"
+  ]
+}

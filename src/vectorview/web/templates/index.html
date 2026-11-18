@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Scans · VectorView{% endblock %}
+{% block content %}
+<section class="page">
+  <h1>Scans</h1>
+  {% if not scans %}
+    <p class="empty">No scans yet. Click <a href="/scans/new">+ New scan</a> to draw a region on the map.</p>
+  {% else %}
+    <ul class="scan-list">
+      {% for scan in scans %}
+        <li class="scan-card">
+          <a href="/scans/{{ scan.id }}" class="scan-card-link">
+            <div class="scan-card-head">
+              <span class="scan-name">{{ scan.name }}</span>
+              {% if scan.fetch_mode == "corpus" %}<span class="badge badge-corpus">corpus</span>{% endif %}
+              <span class="badge badge-status badge-{{ scan.status }}">{{ scan.status }}</span>
+            </div>
+            <div class="scan-card-meta">
+              {% if scan.bbox_n is not none %}
+                bbox: ({{ "%.3f"|format(scan.bbox_s) }}, {{ "%.3f"|format(scan.bbox_w) }}) → ({{ "%.3f"|format(scan.bbox_n) }}, {{ "%.3f"|format(scan.bbox_e) }})
+              {% endif %}
+              · spacing {{ scan.spacing_m }}m
+              · created {{ scan.created_at }}
+            </div>
+          </a>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+</section>
+{% endblock %}

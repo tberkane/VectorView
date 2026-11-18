@@ -1,0 +1,8 @@
+VectorView
+Copyright 2026 Thomas Berkane
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+The web app's pages load Leaflet, Leaflet.draw, htmx and Alpine.js from the unpkg CDN, and map
+tiles from Esri's World Imagery service; none of them is bundled in this repository. Street View
+imagery and metadata are Google's and are not distributed with VectorView.

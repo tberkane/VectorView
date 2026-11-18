@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Verify — {{ q.text }}{% endblock %}
+{% block content %}
+<section class="verify-page">
+  <header class="verify-top">
+    <div class="verify-top-left">
+      <a href="/scans/{{ q.scan_id }}?q={{ q.id }}" class="btn btn-small">← back to results</a>
+      <span class="verify-query muted">Verifying: <em>{{ q.text }}</em></span>
+    </div>
+    <div class="verify-top-right">
+      <span class="verify-progress" id="progress-chip">
+        {{ cursor if not done else total }}<span class="muted">/{{ total }}</span>
+      </span>
+      <span class="verify-precision" id="precision-chip">
+        <span class="muted">precision</span>
+        {{ "%.0f%%"|format(precision * 100) }}
+        <span class="muted">({{ n_yes }} yes · {{ n_no }} no · {{ n_unsure }} unsure)</span>
+      </span>
+    </div>
+  </header>
+
+  <div id="verify-card-area">
+    {% include '_verify_card.html' %}
+  </div>
+
+  <footer class="verify-bottom">
+    <span class="keyhint"><kbd>J</kbd> no</span>
+    <span class="keyhint"><kbd>K</kbd> yes</span>
+    <span class="keyhint"><kbd>U</kbd> unsure</span>
+    <span class="keyhint"><kbd>Space</kbd> skip</span>
+    <span class="keyhint"><kbd>H</kbd> back</span>
+    <span class="keyhint"><kbd>Esc</kbd> exit</span>
+  </footer>
+</section>
+
+<script>
+(function(){
+  function clickById(id) {
+    const el = document.getElementById(id);
+    if (el && !el.disabled) el.click();
+  }
+  document.addEventListener('keydown', (e) => {
+    if (e.target.matches('input, textarea, select')) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const key = e.key.toLowerCase();
+    if (key === 'j') { e.preventDefault(); clickById('btn-no'); }
+    else if (key === 'k') { e.preventDefault(); clickById('btn-yes'); }
+    else if (key === 'u') { e.preventDefault(); clickById('btn-unsure'); }
+    else if (key === ' ') { e.preventDefault(); clickById('btn-skip'); }
+    else if (key === 'h') { e.preventDefault(); clickById('btn-back'); }
+    else if (key === 'escape') {
+      e.preventDefault();
+      const back = document.querySelector('a.btn[href*="back to results"], header a.btn');
+      if (back) window.location.href = back.getAttribute('href');
+    }
+  });
+
+  // Each time HTMX swaps the card, refresh the progress + precision chips
+  // from the new card's data-* attributes.
+  document.body.addEventListener('htmx:afterSwap', (e) => {
+    if (e.detail.target.id !== 'verify-card-area') return;
+    const card = document.querySelector('.verify-card[data-cursor]');
+    if (!card) return;
+    document.getElementById('progress-chip').innerHTML =
+      `${card.dataset.cursor}<span class="muted">/${card.dataset.total}</span>`;
+    const pct = parseFloat(card.dataset.precision);
+    const yes = card.dataset.nYes, no = card.dataset.nNo, unsure = card.dataset.nUnsure;
+    document.getElementById('precision-chip').innerHTML =
+      `<span class="muted">precision</span> ${Math.round(pct * 100)}% ` +
+      `<span class="muted">(${yes} yes · ${no} no · ${unsure} unsure)</span>`;
+  });
+})();
+</script>
+{% endblock %}
